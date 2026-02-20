@@ -1,40 +1,38 @@
-import os
-import anthropic
-from dotenv import load_dotenv
+# main.py
 
-load_dotenv()
-# Make sure your .env or environment variable has ANTHROPIC_API_KEY
-api_key = os.environ.get("ANTHROPIC_API_KEY")
-# print(api_key)
-# if not api_key:
-#     raise ValueError("❌ ANTHROPIC_API_KEY not set. Please set it in your environment.")
+from agent.loop import run_agent
 
-# client = Anthropic(api_key=api_key)
 
-# # Minimal conversation prompt
-# prompt = "\n\nHuman: Hello Claude! Are you working?\n\nAssistant:"
+def main():
+    print("\n" + "="*70)
+    print("🎓 SELF EVALUATION AGENT".center(70))
+    print("="*70 + "\n")
 
-# try:
-#     response = client.completions.create(
-#         model="claude-haiku-4-5-20251001",
-#         prompt=prompt,
-#         max_tokens_to_sample=100,
-#     )
-#     print("\n✅ Claude responded:\n")
-#     print(response.completion)
+    while True:
+        print("Options:")
+        print("  1. Start evaluation")
+        print("  2. Exit")
 
-# except Exception as e:
-#     print("\n❌ Error communicating with Claude:")
-#     print(e)
+        choice = input("\nSelect (1-2): ").strip()
 
-client = anthropic.Anthropic(api_key=api_key)
+        if choice == "1":
+            subject = input("\nWhat subject should I evaluate you on? ").strip()
+            if not subject:
+                print("Please enter a subject!")
+                continue
 
-response = client.messages.create(
-    model="claude-haiku-4-5-20251001",
-    max_tokens=100,
-    messages=[
-        {"role": "user", "content": "Hello Claude, Just checking connection"}
-    ]
-)
+            num_q = input("How many questions? (default 5): ").strip()
+            num_questions = int(num_q) if num_q.isdigit() else 5
 
-print(response.content[0].text)
+            run_agent(subject, num_questions)
+
+        elif choice == "2":
+            print("\n👋 Goodbye!")
+            break
+
+        else:
+            print("Invalid option, please select 1 or 2.")
+
+
+if __name__ == "__main__":
+    main()

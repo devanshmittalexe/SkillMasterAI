@@ -1,5 +1,6 @@
 # config.py
 
+import os
 # MODEL SETTINGS
 
 MODEL = "claude-sonnet-4-6"
@@ -11,6 +12,8 @@ MAX_ITERATIONS = 100  # Safety limit for the agentic loop
 
 DEFAULT_NUM_QUESTIONS = 5
 HISTORY_FILE = "evaluation_history.json"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HISTORY_FILE = os.path.join(BASE_DIR, "data", "evaluation_history.json")
 
 
 # SYSTEM PROMPT

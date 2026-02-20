@@ -1,0 +1,33 @@
+{
+  "Chernobyl Disaster": [
+    {
+      "timestamp": "2026-02-20T21:41:36.417418",
+      "score": 62,
+      "strong_topics": [
+        "Background & Reactor Technology",
+        "Emergency Response & Liquidators"
+      ],
+      "weak_topics": [
+        "The Accident \u2014 Causes & Events",
+        "Political & Global Consequences"
+      ],
+      "total_questions": 5
+    }
+  ],
+  "chernobyl disaster": [
+    {
+      "timestamp": "2026-02-21T00:57:12.554437",
+      "score": 70,
+      "strong_topics": [
+        "Historical Background & Timeline",
+        "Immediate Response & Aftermath",
+        "Causes & Technical Failures"
+      ],
+      "weak_topics": [
+        "Long-term Consequences & Legacy",
+        "Health & Environmental Impact"
+      ],
+      "total_questions": 5
+    }
+  ]
+}
