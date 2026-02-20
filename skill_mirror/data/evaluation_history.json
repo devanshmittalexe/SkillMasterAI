@@ -1,0 +1,22 @@
+{
+  "chernobyl": [
+    {
+      "timestamp": "2026-02-21T01:44:59.036722",
+      "score": 0,
+      "strong_topics": [],
+      "weak_topics": [
+        "The 1986 Nuclear Disaster"
+      ],
+      "total_questions": 1
+    },
+    {
+      "timestamp": "2026-02-21T01:46:01.209862",
+      "score": 0,
+      "strong_topics": [],
+      "weak_topics": [
+        "Causes and Contributing Factors"
+      ],
+      "total_questions": 1
+    }
+  ]
+}
