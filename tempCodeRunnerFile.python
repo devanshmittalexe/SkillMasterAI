@@ -1,0 +1,751 @@
+"""
+Multi-Agent Self-Evaluation System
+===================================
+A sophisticated AI agent system for comprehensive skill evaluation and progress tracking.
+"""
+
+import anthropic
+import json
+import os
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, asdict
+from abc import ABC, abstractmethod
+import time
+
+
+@dataclass
+class Message:
+    """Message structure for agent communication"""
+    sender: str
+    recipient: str
+    content: Dict[str, Any]
+    timestamp: str = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now().isoformat()
+
+
+@dataclass
+class Question:
+    """Question structure"""
+    id: int
+    topic: str
+    question: str
+    difficulty: str
+    answer: Optional[str] = None
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+
+
+@dataclass
+class EvaluationResult:
+    """Complete evaluation result"""
+    subject: str
+    timestamp: str
+    topics: List[str]
+    questions: List[Question]
+    overall_score: float
+    strong_topics: List[str]
+    weak_topics: List[str]
+    insights: str
+    total_time: float
+
+
+class Agent(ABC):
+    """Base Agent class"""
+    
+    def __init__(self, name: str, role: str, client: anthropic.Anthropic):
+        self.name = name
+        self.role = role
+        self.client = client
+        self.message_history: List[Message] = []
+        
+    def log(self, message: str):
+        """Log agent activity"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] 🤖 {self.name}: {message}")
+    
+    def send_message(self, recipient: str, content: Dict[str, Any]) -> Message:
+        """Send a message to another agent"""
+        msg = Message(sender=self.name, recipient=recipient, content=content)
+        self.message_history.append(msg)
+        return msg
+    
+    @abstractmethod
+    def process(self, input_data: Any) -> Any:
+        """Process input and return output"""
+        pass
+    
+    def call_claude(self, prompt: str, system_prompt: str = "") -> str:
+        """Call Claude API"""
+        try:
+            response = self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                system=system_prompt if system_prompt else self.get_system_prompt(),
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.content[0].text
+        except Exception as e:
+            self.log(f"Error calling Claude: {e}")
+            return "{}"
+    
+    @abstractmethod
+    def get_system_prompt(self) -> str:
+        """Get agent-specific system prompt"""
+        pass
+
+
+class TopicAnalyzerAgent(Agent):
+    """Agent responsible for breaking down subjects into subtopics"""
+    
+    def __init__(self, client: anthropic.Anthropic):
+        super().__init__("TopicAnalyzer", "Subject decomposition", client)
+    
+    def get_system_prompt(self) -> str:
+        return """You are the Topic Analyzer agent in a multi-agent evaluation system.
+Your role is to break down any subject into 5-8 key subtopics that comprehensively cover the field.
+These subtopics should be specific, measurable, and appropriate for evaluation.
+
+Always return ONLY valid JSON in this exact format:
+{
+    "topics": ["Topic 1", "Topic 2", "Topic 3", ...],
+    "rationale": "Brief explanation of topic selection"
+}"""
+    
+    def process(self, subject: str) -> Dict[str, Any]:
+        """Analyze subject and extract subtopics"""
+        self.log(f"Analyzing subject: {subject}")
+        
+        prompt = f"""Analyze the subject "{subject}" and break it down into 5-8 key subtopics 
+that should be covered in a comprehensive evaluation.
+
+Consider:
+- Core fundamentals
+- Advanced concepts
+- Practical applications
+- Common pitfalls
+
+Return ONLY valid JSON with the format specified in your system prompt."""
+
+        response = self.call_claude(prompt)
+        
+        try:
+            # Clean response
+            response = response.replace("```json", "").replace("```", "").strip()
+            result = json.loads(response)
+            
+            self.log(f"Identified {len(result['topics'])} subtopics")
+            return result
+            
+        except json.JSONDecodeError as e:
+            self.log(f"Failed to parse JSON: {e}")
+            # Fallback
+            return {
+                "topics": ["Fundamentals", "Intermediate Concepts", "Advanced Topics", 
+                          "Best Practices", "Common Patterns"],
+                "rationale": "Using fallback topics due to parsing error"
+            }
+
+
+class QuestionerAgent(Agent):
+    """Agent responsible for generating evaluation questions"""
+    
+    def __init__(self, client: anthropic.Anthropic):
+        super().__init__("Questioner", "Question generation", client)
+    
+    def get_system_prompt(self) -> str:
+        return """You are the Questioner agent in a multi-agent evaluation system.
+Your role is to create diverse, thought-provoking questions that effectively test knowledge.
+
+Guidelines:
+- Mix difficulty levels (easy: 30%, medium: 50%, hard: 20%)
+- Cover all provided topics evenly
+- Create questions that test understanding, not just memorization
+- Include practical, scenario-based questions
+- Ensure questions are clear and unambiguous
+
+Always return ONLY valid JSON in this exact format:
+{
+    "questions": [
+        {
+            "topic": "Topic name",
+            "question": "Clear question text?",
+            "difficulty": "easy|medium|hard",
+            "focus": "What this question tests"
+        }
+    ]
+}"""
+    
+    def process(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate questions based on topics"""
+        subject = data["subject"]
+        topics = data["topics"]
+        num_questions = data["num_questions"]
+        
+        self.log(f"Generating {num_questions} questions for {len(topics)} topics")
+        
+        prompt = f"""Create {num_questions} evaluation questions for "{subject}".
+
+Topics to cover: {', '.join(topics)}
+
+Requirements:
+- Distribute questions across all topics
+- Mix difficulty levels appropriately
+- Include both conceptual and practical questions
+- Make questions specific and testable
+
+Return ONLY valid JSON with the format specified in your system prompt."""
+
+        response = self.call_claude(prompt)
+        
+        try:
+            response = response.replace("```json", "").replace("```", "").strip()
+            result = json.loads(response)
+            
+            questions = result.get("questions", [])
+            self.log(f"Generated {len(questions)} questions")
+            return questions
+            
+        except json.JSONDecodeError as e:
+            self.log(f"Failed to parse JSON: {e}")
+            return []
+
+
+class ExaminerAgent(Agent):
+    """Agent responsible for administering the exam"""
+    
+    def __init__(self, client: anthropic.Anthropic):
+        super().__init__("Examiner", "Exam administration", client)
+    
+    def get_system_prompt(self) -> str:
+        return "You are the Examiner agent. You administer exams and collect responses."
+    
+    def process(self, questions: List[Dict[str, Any]]) -> List[Question]:
+        """Administer exam and collect answers"""
+        self.log("Starting examination")
+        print("\n" + "="*80)
+        print("📝 EXAMINATION".center(80))
+        print("="*80 + "\n")
+        
+        exam_questions = []
+        
+        for i, q in enumerate(questions, 1):
+            # Create Question object
+            question_obj = Question(
+                id=i,
+                topic=q.get("topic", "General"),
+                question=q.get("question", ""),
+                difficulty=q.get("difficulty", "medium")
+            )
+            
+            # Display question
+            print(f"\n{'─'*80}")
+            print(f"Question {i}/{len(questions)}")
+            print(f"Topic: {question_obj.topic} | Difficulty: {question_obj.difficulty.upper()}")
+            print(f"{'─'*80}")
+            print(f"\n{question_obj.question}\n")
+            
+            # Get answer
+            answer = input("Your answer: ").strip()
+            question_obj.answer = answer if answer else "[No answer provided]"
+            
+            exam_questions.append(question_obj)
+        
+        print("\n" + "="*80)
+        self.log(f"Examination complete. Collected {len(exam_questions)} answers")
+        return exam_questions
+
+
+class InvigilatorAgent(Agent):
+    """Agent responsible for grading answers"""
+    
+    def __init__(self, client: anthropic.Anthropic):
+        super().__init__("Invigilator", "Answer evaluation", client)
+    
+    def get_system_prompt(self) -> str:
+        return """You are the Invigilator agent in a multi-agent evaluation system.
+Your role is to fairly and objectively grade answers.
+
+Grading criteria:
+- Accuracy: Is the answer factually correct?
+- Completeness: Does it cover all necessary points?
+- Clarity: Is it well-explained?
+- Depth: Does it show understanding beyond surface level?
+
+Scoring scale (0-10):
+- 0-3: Incorrect or severely lacking
+- 4-5: Partially correct, missing key elements
+- 6-7: Good answer, minor issues
+- 8-9: Excellent, comprehensive answer
+- 10: Perfect, exceptional insight
+
+Always return ONLY valid JSON in this exact format:
+{
+    "evaluations": [
+        {
+            "score": 7.5,
+            "feedback": "Detailed feedback on strengths and weaknesses",
+            "correct_answer": "Key points that should be covered"
+        }
+    ]
+}"""
+    
+    def process(self, data: Dict[str, Any]) -> List[Question]:
+        """Grade all answers"""
+        subject = data["subject"]
+        questions = data["questions"]
+        
+        self.log(f"Grading {len(questions)} answers")
+        
+        # Prepare questions for grading
+        questions_data = []
+        for q in questions:
+            questions_data.append({
+                "topic": q.topic,
+                "question": q.question,
+                "difficulty": q.difficulty,
+                "answer": q.answer
+            })
+        
+        prompt = f"""Grade these answers for a {subject} evaluation.
+Be fair but rigorous. Provide constructive feedback.
+
+Questions and Answers:
+{json.dumps(questions_data, indent=2)}
+
+Return ONLY valid JSON with the format specified in your system prompt."""
+
+        response = self.call_claude(prompt)
+        
+        try:
+            response = response.replace("```json", "").replace("```", "").strip()
+            result = json.loads(response)
+            
+            evaluations = result.get("evaluations", [])
+            
+            # Update question objects with scores and feedback
+            for i, (q, eval_data) in enumerate(zip(questions, evaluations)):
+                q.score = eval_data.get("score", 0)
+                q.feedback = eval_data.get("feedback", "No feedback provided")
+            
+            self.log(f"Grading complete")
+            return questions
+            
+        except (json.JSONDecodeError, Exception) as e:
+            self.log(f"Error during grading: {e}")
+            # Assign default scores
+            for q in questions:
+                q.score = 5.0
+                q.feedback = "Unable to grade automatically"
+            return questions
+
+
+class AnalyzerAgent(Agent):
+    """Agent responsible for analyzing performance"""
+    
+    def __init__(self, client: anthropic.Anthropic):
+        super().__init__("Analyzer", "Performance analysis", client)
+    
+    def get_system_prompt(self) -> str:
+        return """You are the Analyzer agent in a multi-agent evaluation system.
+Your role is to deeply analyze exam performance and provide actionable insights.
+
+Analysis should include:
+- Identification of strong and weak topics
+- Patterns in errors or misconceptions
+- Specific recommendations for improvement
+- Assessment of overall understanding level
+
+Always return ONLY valid JSON in this exact format:
+{
+    "overall_score": 75.5,
+    "strong_topics": ["Topic 1", "Topic 2"],
+    "weak_topics": ["Topic 3", "Topic 4"],
+    "insights": "Detailed analysis paragraph",
+    "recommendations": ["Specific action 1", "Specific action 2"],
+    "performance_level": "Beginner|Intermediate|Advanced|Expert"
+}"""
+    
+    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze exam performance"""
+        subject = data["subject"]
+        questions = data["questions"]
+        topics = data["topics"]
+        
+        self.log("Analyzing performance patterns")
+        
+        # Calculate topic-wise performance
+        topic_scores = {}
+        for topic in topics:
+            topic_questions = [q for q in questions if q.topic == topic]
+            if topic_questions:
+                avg_score = sum(q.score for q in topic_questions) / len(topic_questions)
+                topic_scores[topic] = {
+                    "score": avg_score,
+                    "count": len(topic_questions)
+                }
+        
+        # Prepare data for AI analysis
+        analysis_data = {
+            "subject": subject,
+            "topic_scores": topic_scores,
+            "questions": [
+                {
+                    "topic": q.topic,
+                    "difficulty": q.difficulty,
+                    "score": q.score,
+                    "answer": q.answer[:100] + "..." if len(q.answer) > 100 else q.answer
+                }
+                for q in questions
+            ]
+        }
+        
+        prompt = f"""Analyze this exam performance for {subject}.
+
+Performance Data:
+{json.dumps(analysis_data, indent=2)}
+
+Provide:
+1. Overall assessment
+2. Strong and weak topics (based on scores)
+3. Deep insights about understanding gaps
+4. Specific, actionable recommendations
+5. Performance level classification
+
+Return ONLY valid JSON with the format specified in your system prompt."""
+
+        response = self.call_claude(prompt)
+        
+        try:
+            response = response.replace("```json", "").replace("```", "").strip()
+            result = json.loads(response)
+            
+            self.log(f"Analysis complete - Performance: {result.get('performance_level', 'Unknown')}")
+            return result
+            
+        except (json.JSONDecodeError, Exception) as e:
+            self.log(f"Error during analysis: {e}")
+            # Fallback analysis
+            overall = sum(q.score for q in questions) / len(questions) * 10
+            sorted_topics = sorted(topic_scores.items(), key=lambda x: x[1]["score"], reverse=True)
+            
+            return {
+                "overall_score": round(overall, 1),
+                "strong_topics": [t[0] for t in sorted_topics[:2]],
+                "weak_topics": [t[0] for t in sorted_topics[-2:]],
+                "insights": "Performance analysis completed. Review weak topics for improvement.",
+                "recommendations": ["Review weak topics", "Practice more problems"],
+                "performance_level": "Intermediate"
+            }
+
+
+class AnnouncerAgent(Agent):
+    """Agent responsible for presenting results"""
+    
+    def __init__(self, client: anthropic.Anthropic):
+        super().__init__("Announcer", "Result presentation", client)
+    
+    def get_system_prompt(self) -> str:
+        return "You are the Announcer agent. You present results in a clear, motivating way."
+    
+    def process(self, result: EvaluationResult, history: List[Dict[str, Any]] = None):
+        """Present comprehensive results"""
+        self.log("Preparing result announcement")
+        
+        print("\n\n" + "="*80)
+        print("🎯 EVALUATION RESULTS".center(80))
+        print("="*80 + "\n")
+        
+        # Header
+        print(f"Subject: {result.subject}")
+        print(f"Date: {result.timestamp}")
+        print(f"Duration: {result.total_time:.1f} seconds")
+        print(f"\n{'─'*80}\n")
+        
+        # Overall Score
+        score_percent = result.overall_score
+        score_bar = "█" * int(score_percent / 2.5) + "░" * (40 - int(score_percent / 2.5))
+        
+        print(f"📊 OVERALL SCORE: {score_percent:.1f}%")
+        print(f"[{score_bar}]")
+        print()
+        
+        # Performance Level
+        level = self._get_performance_emoji(score_percent)
+        print(f"Performance Level: {level}")
+        print(f"\n{'─'*80}\n")
+        
+        # Strong Topics
+        print("💪 STRONG TOPICS:")
+        for topic in result.strong_topics:
+            print(f"  ✓ {topic}")
+        print()
+        
+        # Weak Topics
+        print("📚 TOPICS TO IMPROVE:")
+        for topic in result.weak_topics:
+            print(f"  → {topic}")
+        print()
+        
+        print(f"{'─'*80}\n")
+        
+        # Insights
+        print("🔍 DETAILED INSIGHTS:")
+        print(f"{result.insights}")
+        print()
+        
+        print(f"{'─'*80}\n")
+        
+        # Question Breakdown
+        print("📝 QUESTION-BY-QUESTION BREAKDOWN:\n")
+        for q in result.questions:
+            score_emoji = "🟢" if q.score >= 7 else "🟡" if q.score >= 5 else "🔴"
+            print(f"{score_emoji} Q{q.id}: {q.topic} ({q.difficulty})")
+            print(f"   Score: {q.score}/10")
+            print(f"   Feedback: {q.feedback}")
+            print()
+        
+        # Progress Comparison
+        if history:
+            print(f"{'─'*80}\n")
+            print("📈 PROGRESS TRACKING:\n")
+            self._display_progress(result, history)
+        
+        print("="*80 + "\n")
+    
+    def _get_performance_emoji(self, score: float) -> str:
+        """Get performance level with emoji"""
+        if score >= 90:
+            return "🏆 Expert (90%+)"
+        elif score >= 75:
+            return "⭐ Advanced (75-89%)"
+        elif score >= 60:
+            return "📈 Intermediate (60-74%)"
+        elif score >= 40:
+            return "🌱 Developing (40-59%)"
+        else:
+            return "📚 Beginner (< 40%)"
+    
+    def _display_progress(self, current: EvaluationResult, history: List[Dict[str, Any]]):
+        """Display progress over time"""
+        if len(history) < 2:
+            print("First evaluation - no previous data to compare")
+            return
+        
+        prev = history[-2]
+        change = current.overall_score - prev["score"]
+        change_symbol = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+        
+        print(f"Previous Score: {prev['score']:.1f}%")
+        print(f"Current Score: {current.overall_score:.1f}%")
+        print(f"{change_symbol} Change: {change:+.1f}%")
+        print(f"\nTotal Attempts: {len(history)}")
+        
+        # Show trend
+        print("\nScore Trend:")
+        for i, h in enumerate(history[-5:], 1):  # Last 5 attempts
+            bar = "█" * int(h["score"] / 5)
+            print(f"  Attempt {len(history)-5+i}: [{bar:<20}] {h['score']:.1f}%")
+
+
+class EvaluationOrchestrator:
+    """Main orchestrator that coordinates all agents"""
+    
+    def __init__(self, api_key: str):
+        self.client = anthropic.Anthropic(api_key=api_key)
+        
+        # Initialize all agents
+        self.topic_analyzer = TopicAnalyzerAgent(self.client)
+        self.questioner = QuestionerAgent(self.client)
+        self.examiner = ExaminerAgent(self.client)
+        self.invigilator = InvigilatorAgent(self.client)
+        self.analyzer = AnalyzerAgent(self.client)
+        self.announcer = AnnouncerAgent(self.client)
+        
+        self.storage_file = "evaluation_history.json"
+    
+    def run_evaluation(self, subject: str, num_questions: int = 10):
+        """Run complete evaluation workflow"""
+        print("\n" + "="*80)
+        print("🚀 MULTI-AGENT EVALUATION SYSTEM".center(80))
+        print("="*80 + "\n")
+        
+        start_time = time.time()
+        
+        # Stage 1: Topic Analysis
+        print("Stage 1/6: Topic Analysis")
+        topic_result = self.topic_analyzer.process(subject)
+        topics = topic_result["topics"]
+        time.sleep(0.5)
+        
+        # Stage 2: Question Generation
+        print("\nStage 2/6: Question Generation")
+        questions_data = self.questioner.process({
+            "subject": subject,
+            "topics": topics,
+            "num_questions": num_questions
+        })
+        time.sleep(0.5)
+        
+        # Stage 3: Examination
+        print("\nStage 3/6: Examination")
+        answered_questions = self.examiner.process(questions_data)
+        
+        # Stage 4: Grading
+        print("\nStage 4/6: Grading Answers")
+        graded_questions = self.invigilator.process({
+            "subject": subject,
+            "questions": answered_questions
+        })
+        time.sleep(0.5)
+        
+        # Stage 5: Analysis
+        print("\nStage 5/6: Performance Analysis")
+        analysis = self.analyzer.process({
+            "subject": subject,
+            "topics": topics,
+            "questions": graded_questions
+        })
+        time.sleep(0.5)
+        
+        # Create result object
+        end_time = time.time()
+        result = EvaluationResult(
+            subject=subject,
+            timestamp=datetime.now().isoformat(),
+            topics=topics,
+            questions=graded_questions,
+            overall_score=analysis["overall_score"],
+            strong_topics=analysis["strong_topics"],
+            weak_topics=analysis["weak_topics"],
+            insights=analysis["insights"],
+            total_time=end_time - start_time
+        )
+        
+        # Save to history
+        history = self._save_result(result)
+        
+        # Stage 6: Announcement
+        print("\nStage 6/6: Results Announcement")
+        time.sleep(0.5)
+        self.announcer.process(result, history)
+        
+        return result
+    
+    def _save_result(self, result: EvaluationResult) -> List[Dict[str, Any]]:
+        """Save result to persistent storage"""
+        history = []
+        
+        # Load existing history
+        if os.path.exists(self.storage_file):
+            try:
+                with open(self.storage_file, 'r') as f:
+                    all_history = json.load(f)
+                    history = all_history.get(result.subject, [])
+            except:
+                pass
+        else:
+            all_history = {}
+        
+        # Add new result
+        history.append({
+            "timestamp": result.timestamp,
+            "score": result.overall_score,
+            "total_questions": len(result.questions)
+        })
+        
+        # Update and save
+        all_history[result.subject] = history
+        with open(self.storage_file, 'w') as f:
+            json.dump(all_history, f, indent=2)
+        
+        return history
+    
+    def view_history(self, subject: Optional[str] = None):
+        """View evaluation history"""
+        if not os.path.exists(self.storage_file):
+            print("No evaluation history found.")
+            return
+        
+        with open(self.storage_file, 'r') as f:
+            all_history = json.load(f)
+        
+        if subject:
+            history = all_history.get(subject, [])
+            if not history:
+                print(f"No history found for {subject}")
+                return
+            
+            print(f"\n{'='*60}")
+            print(f"History for: {subject}".center(60))
+            print(f"{'='*60}\n")
+            
+            for i, record in enumerate(history, 1):
+                date = datetime.fromisoformat(record["timestamp"]).strftime("%Y-%m-%d %H:%M")
+                print(f"{i}. {date} - Score: {record['score']:.1f}%")
+        else:
+            print(f"\n{'='*60}")
+            print("All Evaluation History".center(60))
+            print(f"{'='*60}\n")
+            
+            for subj, history in all_history.items():
+                print(f"\n{subj}:")
+                print(f"  Total attempts: {len(history)}")
+                if history:
+                    avg_score = sum(h["score"] for h in history) / len(history)
+                    print(f"  Average score: {avg_score:.1f}%")
+                    print(f"  Latest score: {history[-1]['score']:.1f}%")
+
+
+def main():
+    """Main entry point"""
+    print("\n" + "="*80)
+    print("🎓 AI SELF-EVALUATION SYSTEM".center(80))
+    print("Multi-Agent Architecture".center(80))
+    print("="*80 + "\n")
+    
+    # Get API key
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("Error: ANTHROPIC_API_KEY environment variable not set")
+        print("Please set it with: export ANTHROPIC_API_KEY='your-key-here'")
+        return
+    
+    # Initialize orchestrator
+    orchestrator = EvaluationOrchestrator(api_key)
+    
+    while True:
+        print("\nOptions:")
+        print("1. Start new evaluation")
+        print("2. View history")
+        print("3. Exit")
+        
+        choice = input("\nSelect option (1-3): ").strip()
+        
+        if choice == "1":
+            subject = input("\nEnter subject to evaluate (e.g., Python, Machine Learning): ").strip()
+            if not subject:
+                print("Subject cannot be empty!")
+                continue
+            
+            num_questions = input("Number of questions (default 10): ").strip()
+            num_questions = int(num_questions) if num_questions.isdigit() else 10
+            
+            orchestrator.run_evaluation(subject, num_questions)
+            
+        elif choice == "2":
+            subject = input("\nEnter subject (or press Enter for all): ").strip()
+            orchestrator.view_history(subject if subject else None)
+            
+        elif choice == "3":
+            print("\n👋 Goodbye! Keep learning!")
+            break
+        else:
+            print("Invalid option. Please try again.")
+
+
+if __name__ == "__main__":
+    main()
