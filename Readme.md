@@ -1,9 +1,7 @@
 # 🎓 SkillMirror AI
-### An Autonomous Self-Evaluation Agent powered by Claude
+### An Autonomous Self-Evaluation Agent
 
-SkillMirror is an agentic AI system that evaluates your knowledge on any subject. You pick the topic, Claude drives everything — breaking it into subtopics, generating questions, collecting answers, grading them, and tracking your progress over time.
-
-No hardcoded pipelines. Claude reasons and decides every step.
+SkillMirror is an agentic AI system that evaluates your knowledge on any subject. You pick the topic, the agent drives everything — breaking it into subtopics, generating questions, collecting your answers, grading them, and tracking your progress over time.
 
 ---
 
@@ -12,20 +10,18 @@ No hardcoded pipelines. Claude reasons and decides every step.
 ```
 You choose a subject
         ↓
-Claude analyzes topics
+Agent analyzes topics
         ↓
-Claude generates questions
+Agent generates questions
         ↓
 You answer one by one
         ↓
-Claude grades every answer
+Agent grades every answer
         ↓
 Results saved + history compared
         ↓
 Full report with scores & feedback
 ```
-
-Claude is the brain. The tools are just messengers.
 
 ---
 
@@ -45,7 +41,7 @@ skill_mirror/
 │   └── flag_tools.py         # flag_incomplete_evaluation
 ├── agent/
 │   ├── __init__.py
-│   ├── tool_definitions.py   # Claude's tool manual (schemas)
+│   ├── tool_definitions.py   # Tool schemas passed to the LLM
 │   ├── tool_executor.py      # Routes tool calls to functions
 │   └── loop.py               # The agentic loop
 ├── data/
@@ -83,12 +79,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Add your Anthropic API key
+### 4. Add your API key
 Create a `.env` file inside `skill_mirror/`:
 ```
 ANTHROPIC_API_KEY=your_api_key_here
 ```
-Get your key at [console.anthropic.com](https://console.anthropic.com)
 
 ### 5. Run it
 ```bash
@@ -139,7 +134,7 @@ How many questions? (default 5): 3
 | Tool | Purpose |
 |------|---------|
 | Python 3.11+ | Core language |
-| Anthropic SDK | Claude API access |
+| Anthropic SDK | LLM API access |
 | python-dotenv | Environment variable management |
 | JSON | Persistent history storage |
 | Git | Version control |
@@ -151,7 +146,7 @@ How many questions? (default 5): 3
 Building this project teaches:
 
 - **Agentic AI** — how LLMs drive multi-step workflows using tools
-- **Tool Use** — giving Claude a manual and letting it decide when to call what
+- **Tool Use** — defining tool schemas and letting the model decide when to call them
 - **Version Control** — proper Git branching with `dev → QA → main`
 - **Project Structure** — separating concerns across files and modules
 - **Prompt Engineering** — writing system prompts that enforce strict workflows
